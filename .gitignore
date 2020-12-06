@@ -13,3 +13,4 @@ report/
 run.md
 sync.sh
 demo.ipynb
+*.pth

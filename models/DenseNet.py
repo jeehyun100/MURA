@@ -117,6 +117,7 @@ class MultiBranchDenseNet169(BasicModule):
         self.dropout = nn.Dropout(0.5)
 
         for x in ['XR_ELBOW', 'XR_FINGER', 'XR_FOREARM', 'XR_HAND', 'XR_HUMERUS', 'XR_SHOULDER', 'XR_WRIST']:
+        #for x in ['XR_ELBOW']:#, 'XR_FINGER', 'XR_FOREARM', 'XR_HAND', 'XR_HUMERUS', 'XR_SHOULDER', 'XR_WRIST']:
             setattr(self, f'features_specific_{x}', copy.deepcopy(nn.Sequential(model.features.denseblock4,
                                                                                 model.features.norm5)))
             setattr(self, f'ada_pooling_{x}', nn.AdaptiveAvgPool2d((1, 1)))
@@ -128,8 +129,8 @@ class MultiBranchDenseNet169(BasicModule):
     def forward(self, x, body_part):
         x = self.features_common(x)
         # print('x.size(): ', x.size()) -> torch.Size([8, 640, 10, 10])
-
-        out1 = Variable(t.FloatTensor())
+        #t.cuda.device(0)
+        out1 = Variable(t.FloatTensor()).cuda()
         for (xx, bp) in zip(x, body_part):
             d = xx.unsqueeze(0).cuda()
             d = getattr(self, f'features_specific_{bp}')(d)
@@ -144,7 +145,7 @@ class MultiBranchDenseNet169(BasicModule):
 
         # print('out2.size(): ', out2.size()) -> torch.Size([8, 1664, 10, 10])
 
-        out3 = Variable(t.FloatTensor(), requires_grad=True)
+        out3 = Variable(t.FloatTensor(), requires_grad=True).cuda()
         for (xx, bp) in zip(out2, body_part):
             d = xx.unsqueeze(0).cuda()
             d = getattr(self, f'ada_pooling_{bp}')(d).view(d.size(0), -1)
@@ -155,7 +156,7 @@ class MultiBranchDenseNet169(BasicModule):
 
         # print('out3.size(): ', out3.size()) -> torch.Size([8, 1664])
 
-        out4 = Variable(t.FloatTensor(), requires_grad=True)
+        out4 = Variable(t.FloatTensor(), requires_grad=True).cuda()
         for (xx, bp) in zip(out3, body_part):
             xx = xx.cuda()
             xx = getattr(self, f'classifier_{bp}')(xx)

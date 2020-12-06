@@ -11,14 +11,18 @@ from torchnet import meter
 from tqdm import tqdm
 from sklearn.metrics import cohen_kappa_score#, confusion_matrix
 import time
-
+import torch.nn as nn
 import models
 from config import opt
 from utils import Visualizer, FocalLoss
 from dataset import MURA_Dataset
+import cv2
 
 
 def train(**kwargs):
+
+    os.environ["CUDA_VISIBLE_DEVICES"] = '1'
+
     opt.parse(kwargs)
     if opt.use_visdom:
         vis = Visualizer(opt.env)
@@ -29,16 +33,21 @@ def train(**kwargs):
     # model = ResNet152(num_classes=2)
     model = getattr(models, opt.model)()
     if opt.load_model_path:
+        print("Load model : {0}".format(opt.load_model_path))
         model.load(opt.load_model_path)
     if opt.use_gpu:
+        model = nn.DataParallel(model)
         print('CUDA MODEL!')
         model.cuda()
 
     model.train()
 
     # step 2: data
-    train_data = MURA_Dataset(opt.data_root, opt.train_image_paths, train=True, test=False)
-    val_data = MURA_Dataset(opt.data_root, opt.test_image_paths, train=False, test=False)
+    # train_data = MURA_Dataset(opt.data_root, opt.train_image_paths, 'XR_ELBOW', train=True, test=False)
+    # val_data = MURA_Dataset(opt.data_root, opt.test_image_paths,'XR_ELBOW', train=False, test=False)
+    part = opt.part
+    train_data = MURA_Dataset(opt.data_root, opt.train_image_paths, part, train=True, test=False)
+    val_data = MURA_Dataset(opt.data_root, opt.test_image_paths,part, train=False, test=False)
 
     print('Training images:', len(train_data), 'Validation images:', len(val_data))
 
@@ -62,13 +71,18 @@ def train(**kwargs):
     confusion_matrix = meter.ConfusionMeter(2)
     previous_loss = 1e10
 
-    # step 5: train
-
-    if not os.path.exists(os.path.join('checkpoints', model.model_name)):
-        os.mkdir(os.path.join('checkpoints', model.model_name))
+    # step 5: train     # step 5: train
+    chk_dir = opt.checkpoint_dir
+    #if not os.path.exists(os.path.join('checkpoints', model.model_name)):
+    #if not os.path.exists(os.path.join('checkpoints', model.module.model_name)):
+    if not os.path.exists(os.path.join(chk_dir, model.module.model_name)):
+        #os.mkdir(os.path.join(chk_dir, model.module.model_name), )
+        os.makedirs(os.path.join(chk_dir, model.module.model_name), exist_ok=True)
     prefix = time.strftime('%m%d')
-    if not os.path.exists(os.path.join('checkpoints', model.model_name, prefix)):
-        os.mkdir(os.path.join('checkpoints', model.model_name, prefix))
+    #if not os.path.exists(os.path.join('checkpoints', model.model_name, prefix)):
+    if not os.path.exists(os.path.join(chk_dir, model.module.model_name, prefix)):
+        #os.mkdir(os.path.join(chk_dir, model.module.model_name, prefix))
+        os.makedirs(os.path.join(chk_dir, model.module.model_name, prefix), exist_ok=True)
 
     s = t.nn.Softmax()
     for epoch in range(opt.max_epoch):
@@ -97,7 +111,8 @@ def train(**kwargs):
             optimizer.step()
 
             # meters update and visualize
-            loss_meter.add(loss.data[0])
+            #loss_meter.add(loss.data[0])
+            loss_meter.add(loss.cpu().data)
             confusion_matrix.add(s(Variable(score.data)).data, target.data)
 
             if ii % opt.print_freq == opt.print_freq - 1:
@@ -111,7 +126,7 @@ def train(**kwargs):
                     ipdb.set_trace()
 
         ck_name = f'epoch_{epoch}_{str(opt)}.pth'
-        model.save(os.path.join('checkpoints', model.model_name, prefix, ck_name))
+        model.module.save(os.path.join(chk_dir, model.module.model_name, prefix, ck_name))
         # model.save()
 
         # validate and visualize
@@ -170,9 +185,16 @@ def val(model, dataloader):
         else:
             score = model(val_input)
         # confusion_matrix.add(softmax(score.data.squeeze()), label.type(t.LongTensor))
-        confusion_matrix.add(s(Variable(score.data.squeeze())).data, label.type(t.LongTensor))
+        if s(Variable(score.data.squeeze())).data.cpu().numpy().shape[0] != label.type(t.LongTensor).cpu().numpy().shape[0]:
+            #print("none")
+            confusion_matrix.add(s(Variable(score.data)).data, label.type(t.LongTensor))
+        else:
+            confusion_matrix.add(s(Variable(score.data.squeeze())).data, label.type(t.LongTensor))
+            #print("same")
+
+        #confusion_matrix.add(s(Variable(score.data.squeeze())).data, label.type(t.LongTensor))
         loss = criterion(score, target)
-        loss_meter.add(loss.data[0])
+        loss_meter.add(loss.cpu().data)
 
     model.train()
     cm_value = confusion_matrix.value()
@@ -205,7 +227,7 @@ def test(**kwargs):
     # confusion_matrix = meter.ConfusionMeter(2)
     # s = t.nn.Softmax()
 
-    for ii, (data, label, body_part, path) in tqdm(enumerate(test_dataloader)):
+    for ii, (data, label, path, body_part) in tqdm(enumerate(test_dataloader)):
         input = Variable(data, volatile=True)
         # body_part = Variable(body_part, volatile=True)
         if opt.use_gpu:
@@ -237,6 +259,69 @@ def test(**kwargs):
     calculate_cohen_kappa()
     # return results
 
+
+
+def show(**kwargs):
+    opt.parse(kwargs)
+
+    # configure model
+    # model = DenseNet169(num_classes=2)
+    # model = CustomDenseNet169(num_classes=2)
+    # model = ResNet152(num_classes=2)
+    # model = getattr(models, opt.model)()
+    # if opt.load_model_path:
+    #     model.load(opt.load_model_path)
+    # if opt.use_gpu:
+    #     model.cuda()
+    #
+    # model.eval()
+
+    # data
+    test_data = MURA_Dataset(opt.data_root, opt.test_image_paths, train=False, test=True)
+    test_dataloader = DataLoader(test_data, batch_size=opt.batch_size, shuffle=False, num_workers=opt.num_workers)
+
+    results = []
+    # confusion_matrix = meter.ConfusionMeter(2)
+    # s = t.nn.Softmax()
+
+    for ii, (data, label, path, body_part) in tqdm(enumerate(test_dataloader)):
+        input = Variable(data, volatile=True)
+        # body_part = Variable(body_part, volatile=True)
+        # if opt.use_gpu:
+        #     input = input.cuda()
+        #     # body_part = body_part.cuda()
+        # if opt.model.startswith('MultiBranch'):
+        #     score = model(input, body_part)
+        # else:
+        #     score = model(input)
+        for i in range(data.shape[0]):
+            img_data = data.cpu().numpy()[i]
+            img_data = np.transpose(img_data, (1, 2, 0))
+            # img_data = cv2.cvtColor(img_data, cv2.COLOR_BGR2RGB)
+            cv2.imshow('image', img_data)
+            cv2.waitKey(0)
+            cv2.destroyAllWindows()
+
+        # confusion_matrix.add(s(Variable(score.data.squeeze())).data, label.type(t.LongTensor))
+
+        # probability = t.nn.functional.softmax(score)[:, 0].data.tolist()
+        #
+        # # 每一行为 图片路径 和 positive的概率
+        # batch_results = [(path_, probability_) for path_, probability_ in zip(path, probability)]
+        #
+        # results += batch_results
+
+    # cm_value = confusion_matrix.value()
+    # accuracy = 100. * (cm_value[0][0] + cm_value[1][1]) / (cm_value.sum())
+
+    # print('confusion matrix: ')
+    # print(cm_value)
+    # print(f'accuracy: {accuracy}')
+    #
+    # write_csv(results, opt.result_file)
+    #
+    # calculate_cohen_kappa()
+    # return results
 
 def ensemble_test(**kwargs):
     opt.parse(kwargs)
@@ -373,11 +458,13 @@ def help(**kwargs):
 
 if __name__ == '__main__':
     # ------- Train --------
-    import fire
-    fire.Fire()
+    # import fire
+    # fire.Fire()
+    train()
 
     # ------- Test --------
     # opt.test_image_paths = sys.argv[1]
     # opt.output_csv_path = sys.argv[2]
-    # test()
+    #test()
+    #show()
 
