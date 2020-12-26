@@ -22,15 +22,37 @@ MURA_STD = [0.17956269377916526] * 3
 
 def logo_filter(data, threshold=200):
 
-    im = Image.new('L', data.size)
-
+    #im = Image.new('L', data.size)
+    #im = Image.new('RGB', data.size)
+    data.save("./ori.png")
     list_data = list(data.split()[0].getdata())
-
+    #img_np = np.array(list_data).astype(np.uint8)
+    #img_np = np.expand_dims(img_np,  axis=1)
     pixels = [x if x < threshold else 0 for x in list_data]
+    pixel_np = np.array(pixels).astype(np.uint8)
+    pixel_np= np.expand_dims(pixel_np, axis=1)
+    clahe = cv2.createCLAHE(clipLimit=1, tileGridSize=(4, 4))
+    img_clahe_np = clahe.apply(pixel_np)
 
+    try:
+        img = np.dstack((pixel_np,pixel_np, img_clahe_np))
+    except Exception as e:
+        print("np array make error")
+    img = img.reshape(data.size[1], data.size[0],3)
+    im = Image.fromarray(img)
+    return im
+
+def cleahe_filter(data):
+    #nparray = np.fromstring(data.tobytes(), dtype=np.uint8)
+    im = Image.new('L', data.size)
+    img = np.array(data)#, cv2.COLOR_BGR2GRAY)
+    #img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    clahe = cv2.createCLAHE(clipLimit=1, tileGridSize=(4, 4))
+    pixels = clahe.apply(img)
     im.putdata(data=pixels)
 
     return im
+
 
 
 def crop_minAreaRect(img, rect):
@@ -181,23 +203,26 @@ class MURA_Dataset(object):
                 # 这里的X光图是1 channel的灰度图
                 self.transforms = T.Compose([
                     T.Lambda(logo_filter),
+                    #T.Lambda(cleahe_filter),
                     T.Resize(320),
                     T.RandomCrop(320),
                     T.RandomHorizontalFlip(),
                     T.RandomVerticalFlip(),
                     T.RandomRotation(30),
                     T.ToTensor(),
-                    T.Lambda(lambda x: t.cat([x[0].unsqueeze(0), x[0].unsqueeze(0), x[0].unsqueeze(0)], 0)),  # 转换成3 channel
+                    #T.Lambda(lambda x: t.cat([x[0].unsqueeze(0), x[0].unsqueeze(0), x[0].unsqueeze(0)], 0)),  # 转换成3 channel
                     T.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD),
                 ])
             if not self.train:
                 # 这里的X光图是1 channel的灰度图
                 self.transforms = T.Compose([
                     T.Lambda(logo_filter),
+                    #T.Lambda(cleahe_filter),
                     T.Resize(320),
+                    #T.Resize(320),
                     T.CenterCrop(320),
                     T.ToTensor(),
-                    T.Lambda(lambda x: t.cat([x[0].unsqueeze(0), x[0].unsqueeze(0), x[0].unsqueeze(0)], 0)),  # 转换成3 channel
+                    #T.Lambda(lambda x: t.cat([x[0].unsqueeze(0), x[0].unsqueeze(0), x[0].unsqueeze(0)], 0)),  # 转换成3 channel
                     T.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD),
                 ])
 
@@ -210,15 +235,15 @@ class MURA_Dataset(object):
         data = Image.open(img_path)
         data = self.transforms(data)
 
-        ## align
+        # # align
         # if self.train and not self.test:
         #     img_path = self.imgs[index]
         #     img = cv2.imread(img_path)
         #     # img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        #     img_croped = align_mura_elbow(img)
-        #     self.max_height = img.shape[0] if img.shape[0] > self.max_height else self.max_height
-        #     self.max_width = img.shape[1] if img.shape[1] > self.max_width else self.max_width
-        #     img_croped = cv2.cvtColor(img_croped, cv2.COLOR_BGR2GRAY)
+        #     #img_croped = align_mura_elbow(img)
+        #     #self.max_height = img.shape[0] if img.shape[0] > self.max_height else self.max_height
+        #     #self.max_width = img.shape[1] if img.shape[1] > self.max_width else self.max_width
+        #     img_croped = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         #     # contrast limit가 2이고 title의 size는 8X8
         #     clahe = cv2.createCLAHE(clipLimit=1, tileGridSize=(4, 4))
         #     img_croped = clahe.apply(img_croped)
@@ -227,6 +252,11 @@ class MURA_Dataset(object):
         # if not self.train:
         #     img_path = self.imgs[index]
         #     img = cv2.imread(img_path)
+        #     img_croped = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        #     # contrast limit가 2이고 title의 size는 8X8
+        #     clahe = cv2.createCLAHE(clipLimit=1, tileGridSize=(4, 4))
+        #     img_croped = clahe.apply(img_croped)
+        #     img = img_croped
         #
         # data = Image.fromarray(img)
         # # data = Image.open(img_path)
